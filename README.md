@@ -4,6 +4,8 @@ This Arduino code powers ESP32 temperature sensing modules which are utilized in
 The modules read water temperatures using a DS18B20 sensor and upload said data for each respective resort hot tub to a thingspeak server.
 From there, the temperatures are displayed accordingly on an Android application (https://github.com/Papertik/TemperatureAPP) and a public website (https://www.yilectronics.com/Students/mtkrauss/thingspeak/The_Springs.html)
 
+When programming a sensing module, ensure you are utilizing the correct channel ID and API Key along with the proper Field number.
+
 To Change WiFi Credentials while operating:
   - Press the button connected to Pin 13.
   - Connect to the ESP32 using a BLE-enabled device.
