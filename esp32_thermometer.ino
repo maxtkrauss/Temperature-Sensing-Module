@@ -9,6 +9,7 @@
 #include <NimBLEUtils.h>
 #include <NimBLE2904.h>
 
+// Hardcoded Credentials
 const char* ssid = "Guest";
 String password = "";
 
@@ -35,10 +36,12 @@ unsigned long previousMillisUpload = -intervalUpload;
 // Channel 1
 const char* channelIDStr_write = "2293055";
 const char* apiKey_write = "QMPHX07FG72F2PMD";
+int channel = 1;
 
 // Channel 2
 // const char* channelIDStr_write = "1694548";
 // const char* apiKey_write = "1RJWH4UGTYE9HONA";
+// int channel = 2;
 
 // Field:
 int field = 4;
@@ -76,7 +79,6 @@ float correctedTempF;
 bool button_pressed = false;
 bool waiting = false;
 
-
 // Callbacks for BLE server connections/disconnections
 class MyServerCallbacks : public BLEServerCallbacks {
     void onConnect(NimBLEServer* pServer) {
@@ -111,13 +113,13 @@ void orange() {
 void blue() {
   digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, HIGH);
 }
-void cyan() {
+void success() {
   digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, HIGH); digitalWrite(BLUE_LED, HIGH);
 }
-void yellow() {
+void wait() {
   digitalWrite(RED_LED, HIGH); digitalWrite(ORANGE_LED, HIGH); digitalWrite(BLUE_LED, LOW);
 }
-void purple() {
+void fail() {
   digitalWrite(RED_LED, HIGH); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, HIGH);
 }
 void off() {
@@ -131,19 +133,21 @@ void errorFlash() {
   red(); delay(200); off(); delay(100); red(); delay(200); off(); delay(100);
   red(); delay(200); off(); delay(100); red(); delay(200); off(); delay(1000);
 }
-void bluetoothflash() {
+void bluetoothFlash() {
   blue(); delay(150); blue(); delay(150); blue(); delay(150); blue(); delay(150);
   blue(); delay(150); blue(); delay(150); blue();
 }
 void wifiDelay() {
-  yellow(); delay(1000); off(); delay(1000); bluetooth();
-  yellow(); delay(1000); off(); delay(1000); bluetooth();
+  wait(); delay(1000); off(); delay(1000); bluetooth();
+  wait(); delay(1000); off(); delay(1000); bluetooth();
+  wait(); delay(1000); off(); bluetooth();
 }
 
+// This function allows the ESP32 to actively search for a BLE connection, connect, then take an input of credentials in the form of "SSID,password". The ESP32 then trys to reconnect with those credentials.
 void bluetooth() {
   // Check if the button is pressed to initiate BLE communication
   if (digitalRead(BUTTON_PIN) == HIGH) {
-    bluetoothflash();
+    bluetoothFlash();
     // Initialize BLE server and characteristics
     NimBLEDevice::init("ESP32 BLE Test");
     NimBLEServer* pServer = NimBLEDevice::createServer();
@@ -176,23 +180,26 @@ void bluetooth() {
     Serial.println("New Credentials Received!");
     Serial.println(newCred);
     EEPROM.writeString(0, newCred);
-    EEPROM.commit();
-    blue(); delay(150); off(); delay(100); blue(); delay(150); off(); delay(100);
-    blue(); delay(150); off(); delay(100); blue(); delay(150); off(); delay(100);
+    EEPROM.commit(); 
+    bluetoothFlash();
     ESP.restart();
   }
 }
 
 // function to calculate the adjusted temperature for each temperature reading (Farenheit)
 float TempAdjust(float rawTemp){
-  const float refHigh = 199; // refference temperature of boiling in durango CO
-  const float refLow = 32; // reffernce temperature of freezing
-  const float rawHigh = 183; // find these values with the calib.cpp
-  const float rawLow = 33; // find with calib.cpp
+  const float refHigh = 199.5; // Reference temperature of boiling at FLC, Durango CO
+  const float refLow = 32.0;   // Reference temperature of freezing
+  const float rawHigh = 183.0; // Measured raw sensor value at boiling point
+  const float rawLow = 33.0;   // Measured raw sensor value at freezing point
 
+  // Calculate the ranges for raw sensor values and reference temperatures
   float RawRange = rawHigh - rawLow;
-  float ReferenceRange = refHigh - refLow;                                                                             
-  float CorrectedValue = (((rawTemp - rawLow) * ReferenceRange) / RawRange) + refLow; 
+  float ReferenceRange = refHigh - refLow;
+
+  // Perform linear interpolation to adjust the raw temperature
+  float CorrectedValue = (((rawTemp - rawLow) * ReferenceRange) / RawRange) + refLow;
+  
   return CorrectedValue;
 }
 
@@ -202,6 +209,9 @@ void setup() {
   pinMode(BLUE_LED, OUTPUT);
   pinMode(BUTTON_PIN, INPUT);
   rainbowWipe();
+
+  Serial.print("ESP32 Temperature Sensing Module ");
+  Serial.println(channel +'.'+ field);
 
   Serial.begin(115200);
   DS18B20.begin();
@@ -225,10 +235,10 @@ void setup() {
       creds = creds.substring(index + 1);
     }
   }
-
-  Serial.print("SSID:");
+  Serial.println("Attempting to connect through stored credentials.");
+  Serial.print("Stored SSID:");
   Serial.println(strs[0]);
-  Serial.print("Password:" );
+  Serial.print("Stored Password:" );
   Serial.println(strs[1]);
 
   WiFi.begin(strs[0], strs[1]);
@@ -275,29 +285,24 @@ void loop() {
           DS18B20.requestTemperatures();
           rawtempF = ((DS18B20.getTempCByIndex(0)) * 1.8) + 32;
           correctedTempF = TempAdjust(rawtempF);
-          Serial.println(tempF);
-
-          //Correct temperature reading from calibration
-
-
-          // Send data to ThingSpeak field
-          ThingSpeak.setField(field, tempF);
+          // Send corrected temperature data to ThingSpeak field
+          ThingSpeak.setField(field, correctedTempF);
           int response = ThingSpeak.writeFields(channelID_write, apiKey_write);
           // Check response and handle accordingly
           if (response == 200) {
             Serial.println("Data sent to ThingSpeak successfully.");
             previousMillisUpload = currentMillis;
-            cyan();
+            success();
             delay(2500); bluetooth(); delay(2500);
           } else {
             Serial.println("Error sending data to ThingSpeak. HTTP error code: " + String(response));
-            purple();
+            fail();
             delay(2500); bluetooth(); delay(2500);
           }
         }
       else{
         Serial.println("Waiting for next upload.");
-        yellow();
+        wait();
         delay(2500); bluetooth(); delay(2500);
       }
     // Code for reading password updates from Thingspeak
@@ -308,10 +313,6 @@ void loop() {
      Serial.println(newCred);
      EEPROM.writeString(0, newCred);
      EEPROM.commit();
-
-     cyan(); delay(150); red(); delay(100); cyan(); delay(150); red(); delay(100);
-     cyan(); delay(150); red(); delay(100); cyan(); delay(150); red(); delay(100);
-
      ESP.restart();
    }
   }
