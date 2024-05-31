@@ -71,9 +71,11 @@ int StringCount = 0;
 String EEPROMcreds;
 
 // Init remaining data/state indicator variables
-float tempF;
+float rawtempF;
+float correctedTempF;
 bool button_pressed = false;
 bool waiting = false;
+
 
 // Callbacks for BLE server connections/disconnections
 class MyServerCallbacks : public BLEServerCallbacks {
@@ -181,6 +183,19 @@ void bluetooth() {
   }
 }
 
+// function to calculate the adjusted temperature for each temperature reading (Farenheit)
+float TempAdjust(float rawTemp){
+  const float refHigh = 199; // refference temperature of boiling in durango CO
+  const float refLow = 32; // reffernce temperature of freezing
+  const float rawHigh = 183; // find these values with the calib.cpp
+  const float rawLow = 33; // find with calib.cpp
+
+  float RawRange = rawHigh - rawLow;
+  float ReferenceRange = refHigh - refLow;                                                                             
+  float CorrectedValue = (((rawTemp - rawLow) * ReferenceRange) / RawRange) + refLow; 
+  return CorrectedValue;
+}
+
 void setup() {
   pinMode(RED_LED, OUTPUT);
   pinMode(ORANGE_LED, OUTPUT);
@@ -258,7 +273,8 @@ void loop() {
       if (currentMillis - previousMillisUpload >= intervalUpload) {
           // Perform temperature reading
           DS18B20.requestTemperatures();
-          tempF = ((DS18B20.getTempCByIndex(0)) * 1.8) + 32;
+          rawtempF = ((DS18B20.getTempCByIndex(0)) * 1.8) + 32;
+          correctedTempF = TempAdjust(rawtempF);
           Serial.println(tempF);
 
           //Correct temperature reading from calibration
