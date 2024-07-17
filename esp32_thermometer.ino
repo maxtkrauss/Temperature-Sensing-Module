@@ -10,8 +10,8 @@
 #include <NimBLE2904.h>
 
 // Hardcoded Credentials
-const char* ssid = "Guest";
-String password = "";
+const char* ssid = "PHSR_Sensors";
+String password = "Take@dip2Day";
 
 // Allocate adequate space for the EEPROM and init pins
 #define EEPROM_SIZE 40
@@ -32,6 +32,12 @@ WiFiClient client;
 const long intervalUpload = 900000;
 unsigned long previousMillisUpload = -intervalUpload;
 
+const float refHigh = 200.3; // Reference temperature of boiling at FLC, Durango CO
+const float refLow = 32.0;   // Reference temperature of freezing
+
+const float rawHigh = 199.96; // Measured raw sensor value at boiling point
+const float rawLow = 32.34;   // Measured raw sensor value at freezing point
+
 // Init Thingspeak variables to write temp data
 // Channel 1
 const char* channelIDStr_write = "2293055";
@@ -44,7 +50,7 @@ int channel = 1;
 // int channel = 2;
 
 // Field:
-int field = 4;
+int field = 6;
 
 const char* server = "api.thingspeak.com";
 unsigned long channelID_write = atol(channelIDStr_write);
@@ -103,7 +109,46 @@ class MyCallbacks : public BLECharacteristicCallbacks {
     }
 };
 
-  
+// LED State Indication Functions 
+void red() {
+  digitalWrite(RED_LED, HIGH); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, LOW);
+}
+void orange() {
+  digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, HIGH); digitalWrite(BLUE_LED, LOW);
+}
+void blue() {
+  digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, HIGH);
+}
+void success() {
+  digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, HIGH); digitalWrite(BLUE_LED, HIGH);
+}
+void wait() {
+  digitalWrite(RED_LED, HIGH); digitalWrite(ORANGE_LED, HIGH); digitalWrite(BLUE_LED, LOW);
+}
+void fail() {
+  digitalWrite(RED_LED, HIGH); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, HIGH);
+}
+void off() {
+  digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, LOW);
+}
+void rainbowWipe() {
+  red(); delay(150); orange(); delay(150); blue(); delay(150); red(); delay(150);
+  orange(); delay(150); blue(); delay(150); off();
+}
+void errorFlash() {
+  red(); delay(200); off(); delay(100); red(); delay(200); off(); delay(100);
+  red(); delay(200); off(); delay(100); red(); delay(200); off(); delay(1000);
+}
+void bluetoothFlash() {
+  blue(); delay(150); blue(); delay(150); blue(); delay(150); blue(); delay(150);
+  blue(); delay(150); blue(); delay(150); blue();
+}
+void wifiDelay() {
+  wait(); delay(1000); off(); delay(1000); bluetooth();
+  wait(); delay(1000); off(); delay(1000); bluetooth();
+  wait(); delay(1000); off(); bluetooth();
+}
+
 // This function allows the ESP32 to actively search for a BLE connection, connect, then take an input of credentials in the form of "SSID,password". The ESP32 then trys to reconnect with those credentials.
 void bluetooth() {
   // Check if the button is pressed to initiate BLE communication
@@ -146,53 +191,9 @@ void bluetooth() {
     ESP.restart();
   }
 }
-// LED State Indication Functions 
-void red() {
-  digitalWrite(RED_LED, HIGH); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, LOW);
-}
-void orange() {
-  digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, HIGH); digitalWrite(BLUE_LED, LOW);
-}
-void blue() {
-  digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, HIGH);
-}
-void success() {
-  digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, HIGH); digitalWrite(BLUE_LED, HIGH);
-}
-void wait() {
-  digitalWrite(RED_LED, HIGH); digitalWrite(ORANGE_LED, HIGH); digitalWrite(BLUE_LED, LOW);
-}
-void fail() {
-  digitalWrite(RED_LED, HIGH); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, HIGH);
-}
-void off() {
-  digitalWrite(RED_LED, LOW); digitalWrite(ORANGE_LED, LOW); digitalWrite(BLUE_LED, LOW);
-}
-void rainbowWipe() {
-  red(); delay(150); orange(); delay(150); blue(); delay(150); red(); delay(150);
-  orange(); delay(150); blue(); delay(150); off();
-}
-void errorFlash() {
-  red(); delay(200); off(); delay(100); red(); delay(200); off(); delay(100);
-  red(); delay(200); off(); delay(100); red(); delay(200); off(); delay(1000);
-}
-void bluetoothFlash() {
-  blue(); delay(150); blue(); delay(150); blue(); delay(150); blue(); delay(150);
-  blue(); delay(150); blue(); delay(150); blue();
-}
-void wifiDelay() {
-  wait(); delay(1000); off(); delay(1000); bluetooth();
-  wait(); delay(1000); off(); delay(1000); bluetooth();
-  wait(); delay(1000); off(); bluetooth();
-}
 
 // function to calculate the adjusted temperature for each temperature reading (Farenheit)
 float TempAdjust(float rawTemp){
-  const float refHigh = 199.5; // Reference temperature of boiling at FLC, Durango CO
-  const float refLow = 32.0;   // Reference temperature of freezing
-  const float rawHigh = 200.4; // Measured raw sensor value at boiling point
-  const float rawLow = 32.5;   // Measured raw sensor value at freezing point
-
   // Calculate the ranges for raw sensor values and reference temperatures
   float RawRange = rawHigh - rawLow;
   float ReferenceRange = refHigh - refLow;
@@ -202,21 +203,6 @@ float TempAdjust(float rawTemp){
   
   return CorrectedValue;
 }
-
-float TempSnapshot(){
-  float sum = 0;
-  int snapshotSize = 50;
-  int i = 0;
-  while (i < snapshotSize){
-    DS18B20.requestTemperatures();
-    sum += ((DS18B20.getTempCByIndex(0)) * 1.8) + 32;// adding most recent temp pull to sum
-    delay(200); // should take 50 temps over 10 seconds
-    i++;
-  }
-  return sum/snapshotSize;
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
   pinMode(RED_LED, OUTPUT);
@@ -297,7 +283,8 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED) {
       if (currentMillis - previousMillisUpload >= intervalUpload) {
           // Perform temperature reading
-          rawtempF = TempSnapshot();
+          DS18B20.requestTemperatures();
+          rawtempF = ((DS18B20.getTempCByIndex(0)) * 1.8) + 32;
           correctedTempF = TempAdjust(rawtempF);
           // Send corrected temperature data to ThingSpeak field
           ThingSpeak.setField(field, correctedTempF);
